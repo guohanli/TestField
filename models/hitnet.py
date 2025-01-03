@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -144,7 +146,10 @@ class Hitnet(nn.Module):
         self.backbone = pvt_v2_b2()
 
         if use_pretrain_backbone:
-            path = "./pretrained_pvt/pvt_v2_b2.pth"
+            # 设置预训练权重路径
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            parent_dir = os.path.dirname(current_dir)
+            path = os.path.join(parent_dir, 'pretrained_pvt', 'pvt_v2_b2.pth')
             save_model = torch.load(path)
             model_dict = self.backbone.state_dict()
             state_dict = {k: v for k, v in save_model.items() if k in model_dict.keys()}
@@ -227,8 +232,18 @@ class Hitnet(nn.Module):
         return stage_loss, prediction2_8
 
 
-if __name__ == "__main__":
-    model = Hitnet().cuda()
-    input_tensor = torch.randn(1, 3, 352, 352).cuda()
+if __name__ == '__main__':
+    from utils.tools import get_model_summary
+
+    gpu_id = 1
+    device = f'cuda:{gpu_id}'
+    model = Hitnet().to(device)
+
+    # 获取并打印模型统计信息
+    summary = get_model_summary(model, device)
+    print(summary)
+
+    # 推理测试
+    input_tensor = torch.randn(8, 3, 704, 704).to(device)
+
     prediction1, prediction2 = model(input_tensor)
-    print(prediction1, prediction2)
