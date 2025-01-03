@@ -1,0 +1,2 @@
+pysodmetrics~=1.4.2
+thop
