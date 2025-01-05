@@ -9,16 +9,17 @@ import json
 from models.mynet import MyNet
 from utils.dataloader import get_test_dataloader, get_train_dataloader
 from utils.tools import clip_gradient, save_model_summary
+from test import run_test
 
 
 @dataclass
 class ExperimentConfig:
     # Experiment identification
-    exp_name: str = "Test"
-    exp_description: str = "Loss不除以2, 迭代4次"
+    exp_name: str = "EMCAM_multi_feedback_CAMO"
+    exp_description: str = "不用梯度检查点，迭代3次，每层都反馈，用CAMO测试"
 
     # Device configuration
-    device: str = "cuda:1" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    device: str = "cuda:0" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
     # Training batch parameters
     batch_size: int = 8  # Effective batch size will be batch_size * accumulation_steps
@@ -34,11 +35,11 @@ class ExperimentConfig:
     scheduler_gamma: float = 0.1
 
     # Training duration
-    epochs: int = 1
+    epochs: int = 100
 
     # Dataset parameters
     train_augmentation: bool = True
-    test_dataset_path: str = "./Dataset/TestDataset/COD10K"
+    test_dataset_path: str = "./Dataset/TestDataset/CAMO"
 
     # Auto test configuration
     auto_test: bool = True  # 是否在训练完成后自动运行测试
@@ -164,6 +165,7 @@ def test_loop(dataloader, model, logger, exp_dir):
     model.eval()
     size = len(dataloader.dataset)
     test_loss = 0
+    dataset_name = os.path.basename(config.test_dataset_path)
 
     with torch.no_grad():
         for item in dataloader:
@@ -177,8 +179,8 @@ def test_loop(dataloader, model, logger, exp_dir):
         best_mae = test_loss
         model_path = os.path.join(exp_dir, f"{config.exp_name}_best_model.pth")
         torch.save(model.state_dict(), model_path)
-        logger.info(f"New best model saved with MAE: {best_mae:>8f}")
-    logger.info(f"Test Error: \n Avg MAE loss: {test_loss:>8f} Best MAE: {best_mae:>8f}\n")
+        logger.info(f"New best model saved with MAE: {best_mae:>8f} on {dataset_name}")
+    logger.info(f"Test result on {dataset_name}: \n Avg MAE loss: {test_loss:>8f} Best MAE: {best_mae:>8f}\n")
 
 
 def structure_loss(pred, mask):
@@ -249,13 +251,21 @@ try:
         test_loop(test_dataloader, model, logger, exp_dir)
     logger.info("Training completed successfully!")
 
+    # 删除训练过程中占用的显存变量
+    logger.info("Releasing GPU memory used during training...")
+    # 删除模型和优化器
+    del model, optimizer, scheduler
+    # 删除数据加载器
+    del train_dataloader, test_dataloader
+    # 清空 GPU 缓存
+    if "cuda" in config.device:
+        torch.cuda.empty_cache()
+
     # 如果启用了自动测试，运行测试脚本
     if config.auto_test:
         logger.info("Starting automatic testing...")
         try:
-            from test import run_test
-
-            test_results = run_test(exp_dir)
+            test_results = run_test(exp_dir, config.device)
 
             # 创建一个新的有序字典，确保 experiment_info 在最前面
             results = {

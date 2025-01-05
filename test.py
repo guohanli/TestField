@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import json
 import sys
 import cv2
 import torch
@@ -8,8 +9,22 @@ from torchvision import transforms
 import py_sod_metrics
 from tqdm import tqdm
 
-from models.mynet import MyNet
 from utils.dataloader import get_test_dataloader
+import importlib.util
+
+
+# 从 exp_dir 动态导入 MyNet
+def import_mynet_from_exp_dir(exp_dir):
+    # 构建 mynet.py 的路径
+    mynet_path = Path(exp_dir) / "code_backup" / "models" / "mynet.py"
+
+    # 使用 importlib 动态加载模块
+    spec = importlib.util.spec_from_file_location("mynet", mynet_path)
+    mynet_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mynet_module)
+
+    # 返回 MyNet 类
+    return mynet_module.MyNet
 
 
 class Config:
@@ -31,11 +46,13 @@ class Config:
     datasets = ["CAMO", "CHAMELEON", "COD10K", "NC4K"]
 
     @classmethod
-    def setup(cls, exp_dir):
+    def setup(cls, exp_dir, device):
         """设置实验目录和权重路径"""
         cls.exp_dir = Path(exp_dir)
         cls.weight_path = list(cls.exp_dir.glob("*best_model.pth"))[0]
         cls.result_imgs_path = cls.exp_dir / "result_imgs"
+        if device:
+            cls.device = device
 
 
 def save_binary_image(image_path, binary_image_tensor):
@@ -111,11 +128,14 @@ def cal_metrics(mask_root, pred_root, dataset_name):
     return result
 
 
-def run_test(exp_dir):
+def run_test(exp_dir, device=None):
     """运行测试流程"""
     # 设置配置
-    Config.setup(exp_dir)
+    Config.setup(exp_dir, device)
     print(f"Using {Config.device} device")
+
+    # 动态导入 MyNet
+    MyNet = import_mynet_from_exp_dir(exp_dir)
 
     # 加载模型
     model = MyNet().to(Config.device)
@@ -163,12 +183,10 @@ def run_test(exp_dir):
 
 
 if __name__ == "__main__":
-    import argparse
+    exp_dir = "logs/EMCAM_multi_feedback_20250104_213001"
+    results = run_test(exp_dir)
 
-    parser = argparse.ArgumentParser(description='Run test and evaluation.')
-    parser.add_argument('--exp_dir', type=str,
-                        default=sorted(Path("logs").glob("MyNet_*"))[-1],
-                        help='Experiment directory path (default: latest MyNet experiment)')
-    args = parser.parse_args()
-
-    run_test(args.exp_dir)
+    # 保存测试结果
+    result_path = os.path.join(exp_dir, "result.json")
+    with open(result_path, 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=4, ensure_ascii=False)
